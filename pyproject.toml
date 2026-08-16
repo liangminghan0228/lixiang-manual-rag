@@ -1,0 +1,41 @@
+[project]
+name = "lixiang-qdrant-rag"
+version = "0.1.0"
+description = "A minimal, evidence-grounded RAG demo for Li Auto manuals."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "beautifulsoup4>=4.12.3",
+  "fastapi>=0.115.0",
+  "FlagEmbedding>=1.3.5",
+  "httpx>=0.28.0",
+  "lxml>=5.3.0",
+  "openai>=1.68.0",
+  "pydantic>=2.10.0",
+  "pydantic-settings>=2.7.0",
+  "prometheus-client>=0.22.0",
+  "pyyaml>=6.0.2",
+  "qdrant-client>=1.18.0,<2",
+  "transformers>=4.57.0,<5",
+  "uvicorn[standard]>=0.34.0",
+]
+
+[dependency-groups]
+dev = [
+  "locust>=2.37.0",
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.25.0",
+  "ruff>=0.9.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

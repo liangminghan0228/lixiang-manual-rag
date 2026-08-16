@@ -1,0 +1,45 @@
+experiment:
+  id: dense-bge-reranker-heading-500-v1
+
+data:
+  source_url: https://manuals.lixiang.com/zh-cn/W022025ULTRA/20250916141802/index.html
+  snapshot_id: "20250916141802"
+  chunker: heading
+  target_chars: 500
+  overlap_chars: 80
+
+embedding:
+  provider: bge_m3_local
+  model: BAAI/bge-m3
+  batch_size: 8
+
+vector_store:
+  provider: qdrant
+  url: http://localhost:6333
+  collection: lixiang_mvp_bge_m3_v1
+
+retrieval:
+  provider: dense
+  query_processor: identity
+  top_k: 5
+  candidate_top_k: 10
+  evidence_top_k: 3
+  min_score: null  # 使用冻结评测集校准后填写
+  per_topic_limit: 2
+  evidence_selector: diversified
+  reranker:
+    provider: bge_local
+    model: BAAI/bge-reranker-v2-m3
+    batch_size: 8
+    max_length: 1024
+    use_fp16: false
+
+generation:
+  provider: openrouter
+  model: openrouter/free
+  mock_when_key_missing: true
+  require_inline_citations: true
+  citation_repair_attempts: 1
+
+monitoring:
+  enabled: true

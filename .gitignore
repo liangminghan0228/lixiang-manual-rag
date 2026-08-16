@@ -1,0 +1,64 @@
+# Environment variables and local secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Python environments
+.venv/
+venv/
+env/
+
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Packaging and build output
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE, editor, and OS files
+.DS_Store
+.idea/
+.vscode/
+**/.gitkeep
+*.swp
+*.swo
+*~
+
+# Runtime logs and temporary files
+*.log
+*.tmp
+*.pid
+logs/
+tmp/
+
+# Downloaded manuals, normalized chunks, and evaluation datasets
+data/
+
+# Generated evaluation, load-test, and run reports
+reports/
+
+# Embedding caches, generated artifacts, and local model caches
+artifacts/
+.cache/
+models/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+
+# Local Qdrant persistence
+qdrant_storage/

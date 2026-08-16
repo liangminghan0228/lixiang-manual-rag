@@ -1,0 +1,61 @@
+experiment:
+  id: all-official-manuals-bge-m3-v1
+  manifest_dir: reports/runs/all-models
+
+data:
+  source_url: https://manuals.lixiang.com/zh-cn/W022025ULTRA/20260422091942/index.html
+  snapshot_id: "20260422091942"
+  catalog_url: https://manuals.lixiang.com/carlmodels_zh-cn_officialwebsite.json
+  chunker: heading
+  target_chars: 500
+  overlap_chars: 80
+  request_concurrency: 2
+  requests_per_second: 2.0
+  request_timeout_seconds: 20
+  request_retries: 3
+  incremental: true
+  # URL includes an immutable snapshot id; catalog discovery finds newer snapshots.
+  # Reuse completed files on restart instead of issuing 7,645 conditional requests.
+  revalidate_remote: false
+  embedding_content_only: true
+  embedding_cache_enabled: true
+  embedding_cache_path: artifacts/all-models-bge-m3-cache.sqlite3
+
+embedding:
+  provider: bge_m3_local
+  model: BAAI/bge-m3
+  batch_size: 8
+  max_length: 512
+
+vector_store:
+  provider: qdrant
+  url: http://localhost:6333
+  collection: lixiang_all_manuals_bge_m3_v1
+  timeout_seconds: 30
+
+retrieval:
+  # Current BM25 adapter scans the whole collection per query; keep the
+  # all-model online path dense until a persistent sparse index is added.
+  provider: dense
+  query_processor: identity
+  top_k: 5
+  candidate_top_k: 10
+  evidence_top_k: 3
+  per_topic_limit: 2
+  evidence_selector: diversified
+  rrf_k: 60
+  reranker:
+    provider: bge_local
+    model: BAAI/bge-reranker-v2-m3
+    batch_size: 8
+    max_length: 1024
+
+generation:
+  provider: openrouter
+  model: openrouter/free
+  mock_when_key_missing: true
+  require_inline_citations: true
+  citation_repair_attempts: 1
+
+monitoring:
+  enabled: true

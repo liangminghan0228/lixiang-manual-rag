@@ -1,0 +1,32 @@
+data:
+  source_url: https://manuals.lixiang.com/zh-cn/W022025ULTRA/20250916141802/index.html
+  snapshot_id: "20250916141802"
+  chunker: heading
+  target_chars: 500
+  overlap_chars: 80
+  request_concurrency: 2
+  requests_per_second: 2.0
+  request_timeout_seconds: 20
+  request_retries: 3
+
+embedding:
+  provider: hash_mock
+  model: hash-mock
+  batch_size: 64
+  mock_dimension: 64
+
+vector_store:
+  provider: in_memory
+  url: memory
+  collection: local-smoke
+
+retrieval:
+  provider: dense
+  top_k: 5
+  evidence_top_k: 3
+  min_score: null
+
+generation:
+  provider: mock
+  model: mock
+  mock_when_key_missing: true

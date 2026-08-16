@@ -1,0 +1,28 @@
+data:
+  source_url: https://manuals.lixiang.com/test/index.html
+  snapshot_id: "test-snapshot"
+  chunker: heading
+  target_chars: 300
+  overlap_chars: 40
+
+embedding:
+  provider: hash_mock
+  model: hash-mock
+  batch_size: 8
+  mock_dimension: 64
+
+vector_store:
+  provider: in_memory
+  url: memory
+  collection: test
+
+retrieval:
+  provider: dense
+  top_k: 5
+  evidence_top_k: 3
+  min_score: null
+
+generation:
+  provider: mock
+  model: mock
+  mock_when_key_missing: true

@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>RAG Request Trace</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background:#f4f7f3; color:#18221e; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#f4f7f3; color:#18221e; }
+    button,input,select { font:inherit; }
+    .shell { min-height:100vh; }
+    header { height:62px; display:flex; align-items:center; justify-content:space-between; padding:0 22px; border-bottom:1px solid #dce4de; background:#fff; }
+    .brand { display:flex; align-items:center; gap:10px; font-weight:800; }
+    .logo { width:30px; height:30px; display:grid; place-items:center; border-radius:9px; color:#fff; background:#167a53; }
+    .trace-id { color:#76827c; font:11px ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .status { color:#167a53; font-size:11px; font-weight:750; }
+    .request { display:grid; grid-template-columns:minmax(0,1fr) 210px 100px; gap:10px; padding:14px 22px; border-bottom:1px solid #dce4de; background:#fff; }
+    .request input,.request select { width:100%; border:1px solid #d6dfd9; border-radius:9px; padding:10px 11px; color:#18221e; background:#f8faf8; }
+    .request button { border:0; border-radius:9px; color:#fff; background:#167a53; font-weight:750; cursor:pointer; }
+    .layout { display:grid; grid-template-columns:270px minmax(0,1fr); min-height:calc(100vh - 123px); }
+    aside { padding:18px 12px; border-right:1px solid #dce4de; background:#fff; }
+    .label { margin:0 10px 10px; color:#7a867f; font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+    .stage { width:100%; display:grid; grid-template-columns:25px 1fr auto; gap:9px; align-items:start; padding:9px; border:0; border-radius:10px; color:#68756e; background:transparent; text-align:left; cursor:pointer; }
+    .stage:hover { background:#f0f4f1; }
+    .stage.active { color:#146f4c; background:#e0f4e9; }
+    .stage.done .step { color:#fff; background:#20835d; }
+    .stage.failed .step { color:#fff; background:#b7473c; }
+    .step { width:22px; height:22px; display:grid; place-items:center; border-radius:50%; color:#748079; background:#e5ebe7; font-size:9px; font-weight:800; }
+    .stage-name { display:block; margin-top:2px; font-size:12px; font-weight:730; }
+    .stage-note { display:block; margin-top:3px; color:#8a958f; font-size:9px; }
+    .duration { margin-top:4px; font:9px ui-monospace,SFMono-Regular,Menlo,monospace; }
+    main { min-width:0; padding:20px; }
+    .summary { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:14px; }
+    .chip { padding:5px 8px; border-radius:999px; color:#58665f; background:#e8ede9; font-size:9px; font-weight:700; }
+    .chip.good { color:#146f4c; background:#dff4e9; }
+    h1 { margin:0; font-size:21px; letter-spacing:-.03em; }
+    .subtitle { margin:6px 0 16px; color:#6f7b75; font-size:11px; }
+    .grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(260px,.75fr); gap:12px; }
+    .panel { overflow:hidden; border:1px solid #d9e2dc; border-radius:12px; background:#fff; }
+    .panel-head { display:flex; justify-content:space-between; align-items:center; padding:11px 13px; border-bottom:1px solid #dfe6e1; font-size:11px; font-weight:760; }
+    .panel-body { padding:12px; }
+    .kv { display:grid; grid-template-columns:130px minmax(0,1fr); gap:10px; padding:7px 0; border-bottom:1px solid #e8ede9; font-size:10px; }
+    .kv:last-child { border:0; }
+    .key { color:#78847e; }
+    .value { overflow-wrap:anywhere; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    pre { max-height:420px; overflow:auto; margin:0; padding:13px; color:#29483b; background:#f2f6f3; font:10px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+    table { width:100%; border-collapse:collapse; font-size:10px; }
+    th { color:#748079; text-align:left; font-weight:650; }
+    th,td { padding:8px 7px; border-bottom:1px solid #e7ece8; vertical-align:top; }
+    tr[data-chunk] { cursor:pointer; }
+    tr[data-chunk]:hover { background:#f0f6f2; }
+    .up { color:#167a53; font-weight:800; }
+    .down { color:#b95835; font-weight:800; }
+    .heat { display:grid; grid-template-columns:repeat(16,1fr); gap:3px; margin-top:12px; }
+    .heat span { aspect-ratio:1; border-radius:3px; background:#dce9e1; }
+    .pair { margin-top:10px; border:1px solid #dfe6e1; border-radius:9px; overflow:hidden; }
+    .pair summary { padding:9px 11px; cursor:pointer; font-size:10px; font-weight:700; background:#f5f8f5; }
+    .pair pre { max-height:240px; }
+    .empty { padding:80px 20px; color:#7b8781; text-align:center; }
+    .error { padding:11px 12px; border-left:3px solid #b7473c; color:#8e382f; background:#fbe7e4; font-size:11px; }
+    @media (prefers-color-scheme:dark) {
+      :root,body { color:#edf4f0; background:#101613; }
+      header,.request,aside,.panel { background:#18201c; border-color:#344039; }
+      .request input,.request select { color:#edf4f0; background:#111713; border-color:#344039; }
+      .stage { color:#a7b3ad; } .stage:hover { background:#202a25; } .stage.active { color:#72d2aa; background:#173a2c; }
+      .chip { color:#afbbb5; background:#222c27; } .chip.good { color:#69d4a8; background:#173a2c; }
+      .subtitle,.label,.key { color:#9aa7a0; }
+      .panel-head,.kv,th,td,.pair { border-color:#2d3832; }
+      pre,.pair summary { color:#c9ddd3; background:#111713; }
+      tr[data-chunk]:hover { background:#202a25; }
+      .heat span { background:#294136; }
+    }
+    @media (max-width:760px) {
+      .request { grid-template-columns:1fr 92px; padding:10px; } .request select { display:none; }
+      .layout { grid-template-columns:1fr; }
+      aside { display:flex; overflow-x:auto; padding:8px; border-right:0; border-bottom:1px solid #dce4de; }
+      .label { display:none; } .stage { flex:0 0 120px; grid-template-columns:23px 1fr; } .duration { display:none; }
+      main { padding:14px; } .grid { grid-template-columns:1fr; } header { padding:0 12px; } .trace-id { display:none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header><div class="brand"><span class="logo">R</span>RAG Request Trace</div><div id="trace-id" class="trace-id">尚未运行</div><div id="status" class="status">Ready</div></header>
+    <div class="request">
+      <input id="question" value="驾驶前需要检查什么？" aria-label="问题">
+      <select id="trace-level" aria-label="Trace 级别"><option value="sampled">Sampled Trace</option><option value="summary">Summary Trace</option><option value="full">Full Trace</option></select>
+      <button id="run" type="button">运行</button>
+    </div>
+    <div class="layout">
+      <aside id="stages"><div class="label">请求执行链</div></aside>
+      <main>
+        <div id="summary" class="summary"><span class="chip">等待请求</span></div>
+        <div id="content" class="empty">输入问题并点击“运行”，服务端每完成一个阶段都会实时显示在这里。</div>
+      </main>
+    </div>
+  </div>
+  <script>
+    const definitions = [
+      ['request','请求解析','规范化问题与过滤条件'],
+      ['embedding','Query Embedding','输入、向量摘要与耗时'],
+      ['retrieval','候选召回','Dense、BM25 与 RRF'],
+      ['rerank','精排','Pair、分数与名次变化'],
+      ['evidence','证据选择','阈值、去重与 Topic 配额'],
+      ['llm','LLM 输入输出','Prompt、原始回答与元数据'],
+      ['citation','引用校验','解析、修复与拒答'],
+      ['response','最终响应','答案、证据与总耗时']
+    ];
+    const state = { events: [], selected: 'request', source: null };
+    const stages = document.getElementById('stages');
+    const content = document.getElementById('content');
+    const summary = document.getElementById('summary');
+
+    definitions.forEach(([key,name,note], index) => {
+      const button = document.createElement('button');
+      button.className = 'stage'; button.dataset.stage = key;
+      button.innerHTML = `<span class="step">${index + 1}</span><span><span class="stage-name">${name}</span><span class="stage-note">${note}</span></span><span class="duration">—</span>`;
+      button.addEventListener('click', () => { state.selected = key; render(); });
+      stages.appendChild(button);
+    });
+
+    const safe = value => value === null || value === undefined ? '—' : String(value);
+    const json = value => JSON.stringify(value, null, 2);
+    const latest = (stage, event) => [...state.events].reverse().find(item => item.stage === stage && (!event || item.event === event));
+    const eventsFor = stage => state.events.filter(item => item.stage === stage);
+
+    function panel(title, body) {
+      const box = document.createElement('section'); box.className = 'panel';
+      const head = document.createElement('div'); head.className = 'panel-head'; head.textContent = title;
+      const panelBody = document.createElement('div'); panelBody.className = 'panel-body';
+      if (typeof body === 'string') { const pre = document.createElement('pre'); pre.textContent = body; panelBody.appendChild(pre); }
+      else if (body) panelBody.appendChild(body);
+      box.append(head, panelBody); return box;
+    }
+    function kvList(values) {
+      const wrap = document.createElement('div');
+      Object.entries(values).forEach(([key,value]) => {
+        const row = document.createElement('div'); row.className = 'kv';
+        const k = document.createElement('span'); k.className = 'key'; k.textContent = key;
+        const v = document.createElement('span'); v.className = 'value'; v.textContent = typeof value === 'object' ? json(value) : safe(value);
+        row.append(k,v); wrap.appendChild(row);
+      }); return wrap;
+    }
+    function candidateTable(items, rerank=false) {
+      const table = document.createElement('table');
+      const head = document.createElement('thead');
+      head.innerHTML = rerank ? '<tr><th>召回</th><th>精排</th><th>Chunk</th><th>Recall</th><th>Rerank</th><th>变化</th></tr>' : '<tr><th>排名</th><th>Chunk</th><th>分数</th><th>来源</th></tr>';
+      table.appendChild(head); const body = document.createElement('tbody');
+      (items || []).forEach(item => {
+        const row = document.createElement('tr'); row.dataset.chunk = item.chunk_id;
+        const delta = item.rank_delta || 0; const deltaText = delta > 0 ? `↑${delta}` : delta < 0 ? `↓${Math.abs(delta)}` : '—';
+        const values = rerank ? [item.before_rank,item.after_rank,item.title,item.recall_score,item.rerank_score,deltaText] : [item.rank,item.title,item.score,item.retriever_id];
+        values.forEach((value,index) => { const cell=document.createElement('td'); cell.textContent=safe(value); if(rerank && index===5) cell.className=delta>0?'up':delta<0?'down':''; row.appendChild(cell); });
+        row.title = item.excerpt || ''; body.appendChild(row);
+      }); table.appendChild(body); return table;
+    }
+    function renderEmbedding(event) {
+      const payload = event?.payload || {}; const grid=document.createElement('div'); grid.className='grid';
+      grid.append(panel('实际输入', kvList({model:payload.model,input:payload.input,input_chars:payload.input_chars,dimension:payload.dimension,elapsed_ms:event?.elapsed_ms})), panel('向量统计', kvList(payload.stats || {})));
+      const heatPanel=panel(`向量预览 · ${payload.preview?.length || 0}/${payload.dimension || 0} 维`, null); const heat=document.createElement('div'); heat.className='heat';
+      (payload.preview || []).forEach(value => { const cell=document.createElement('span'); const alpha=Math.min(.95,.15+Math.abs(value)*8); cell.style.background=value>=0?`rgba(22,122,83,${alpha})`:`rgba(185,88,53,${alpha})`; cell.title=String(value); heat.appendChild(cell); });
+      heatPanel.querySelector('.panel-body').append(heat, kvList({preview:payload.preview || [],top_absolute_dimensions:payload.top_absolute_dimensions || []})); content.append(grid,heatPanel);
+    }
+    function renderRetrieval() {
+      ['retrieval.dense.completed','retrieval.bm25.completed','retrieval.fused'].forEach(name => { const event=latest('retrieval',name); if(event) content.append(panel(`${name} · ${safe(event.elapsed_ms)} ms`, candidateTable(event.payload.candidates))); });
+    }
+    function renderRerank(event) {
+      const payload=event?.payload || {}; content.append(panel(`全部排序结果 · ${payload.model || ''}`, candidateTable(payload.items,true)));
+      (payload.sampled_pairs || []).forEach(item => { const details=document.createElement('details'); details.className='pair'; const title=document.createElement('summary'); title.textContent=`Pair · ${item.chunk_id}`; const pre=document.createElement('pre'); pre.textContent=`QUERY\n${item.query}\n\nCANDIDATE\n${item.candidate}\n\n候选字符数：${item.candidate_chars} · Trace 截断：${item.text_truncated_for_trace}`; details.append(title,pre); content.appendChild(details); });
+    }
+    function renderEvidence(event) { content.append(panel('Evidence 决策', json(event?.payload || {}))); }
+    function renderLlm() { eventsFor('llm').forEach(event => content.append(panel(event.event, json(event.payload)))); }
+    function renderGeneric(stage) { eventsFor(stage).forEach(event => content.append(panel(event.event, json({elapsed_ms:event.elapsed_ms,...event.payload})))); }
+
+    function render() {
+      document.querySelectorAll('.stage').forEach(button => {
+        const stageEvents=eventsFor(button.dataset.stage); button.classList.toggle('active',button.dataset.stage===state.selected); button.classList.toggle('done',stageEvents.some(e=>e.status==='completed')); button.classList.toggle('failed',stageEvents.some(e=>e.status==='failed'));
+        const timed=[...stageEvents].reverse().find(e=>e.elapsed_ms!==null); button.querySelector('.duration').textContent=timed?`${Math.round(timed.elapsed_ms)}ms`:'—';
+      });
+      const final=latest('response','response.completed'); summary.replaceChildren();
+      [`事件 ${state.events.length}`,`候选 ${latest('rerank')?.payload?.candidate_count || 0}`,`证据 ${latest('evidence')?.payload?.selected_chunk_ids?.length || 0}`,final?.payload?.citation_validated?'引用有效':'引用待校验'].forEach((text,index)=>{const chip=document.createElement('span');chip.className='chip'+(index===0?' good':'');chip.textContent=text;summary.appendChild(chip);});
+      content.className=''; content.replaceChildren(); const selectedDef=definitions.find(item=>item[0]===state.selected); const title=document.createElement('h1');title.textContent=selectedDef[1];const sub=document.createElement('p');sub.className='subtitle';sub.textContent=selectedDef[2];content.append(title,sub);
+      if(state.selected==='embedding') renderEmbedding(latest('embedding','embedding.completed')); else if(state.selected==='retrieval') renderRetrieval(); else if(state.selected==='rerank') renderRerank(latest('rerank','rerank.completed')); else if(state.selected==='evidence') renderEvidence(latest('evidence','evidence.completed')); else if(state.selected==='llm') renderLlm(); else renderGeneric(state.selected);
+      if(!eventsFor(state.selected).length) { const empty=document.createElement('div');empty.className='empty';empty.textContent='该阶段尚未产生事件。';content.appendChild(empty); }
+    }
+
+    document.getElementById('run').addEventListener('click', async () => {
+      const button=document.getElementById('run'); button.disabled=true; state.events=[]; state.selected='request'; render();
+      if(state.source) state.source.close(); document.getElementById('status').textContent='Running';
+      try {
+        const response=await fetch('/v1/traces',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:document.getElementById('question').value,trace_level:document.getElementById('trace-level').value,filters:{}})});
+        if(!response.ok) throw new Error(await response.text()); const created=await response.json(); document.getElementById('trace-id').textContent=created.trace_id;
+        const source=new EventSource(created.events_url); state.source=source;
+        definitions.forEach(([stage]) => source.addEventListener(`${stage}.completed`, onEvent));
+        ['request.received','request.normalized','request.failed','embedding.started','retrieval.dense.completed','retrieval.bm25.completed','retrieval.fused','retrieval.pipeline.completed','rerank.completed','evidence.completed','llm.input','llm.output','citation.validated','citation.repair.started','citation.repair.completed','response.completed'].forEach(name=>source.addEventListener(name,onEvent));
+        source.onerror=async()=>{ source.close(); const snapshot=await fetch(created.snapshot_url).then(item=>item.json()); document.getElementById('status').textContent=snapshot.status; button.disabled=false; if(snapshot.status==='failed'){const box=document.createElement('div');box.className='error';box.textContent=snapshot.error;content.prepend(box);} };
+      } catch(error) { document.getElementById('status').textContent='Failed'; content.textContent=String(error); button.disabled=false; }
+    });
+    function onEvent(message) { const event=JSON.parse(message.data); if(!state.events.some(item=>item.seq===event.seq)) state.events.push(event); if(event.status==='completed') state.selected=event.stage; if(event.event==='response.completed'){document.getElementById('status').textContent='Completed';document.getElementById('run').disabled=false;} render(); }
+    render();
+  </script>
+</body>
+</html>
