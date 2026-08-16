@@ -186,7 +186,7 @@ class LiXiangManualCrawler:
         self.topic_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = self.output_dir / "manifest.jsonl"
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
-        headers = {"User-Agent": "lixiang-qdrant-rag-learning-demo/0.1"}
+        headers = {"User-Agent": "lixiang-manual-rag-learning-demo/0.1"}
 
         async with httpx.AsyncClient(
             timeout=timeout,

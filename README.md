@@ -1,6 +1,6 @@
-# Li Auto Qdrant RAG
+# 理想汽车手册 RAG
 
-从零实现的中文 RAG 学习项目：抓取理想汽车公开用户手册，用本地 BGE-M3、Qdrant、可选 BM25/Hybrid 与 BGE Reranker 完成检索，通过 OpenRouter 输出严格引用答案，并用分层离线集、Locust 和 Prometheus 分析质量与性能。
+从零实现的中文 RAG 学习项目：抓取理想汽车公开用户手册，用本地 BGE-M3、可替换的检索与向量存储组件完成召回和精排，通过 OpenRouter 输出严格引用答案，并用分层离线集、Locust 和 Prometheus 分析质量与性能。当前默认向量存储实现为 Qdrant。
 
 当前实现是单体、模块化 RAG，不包含 Agent、多租户权限和消息队列。自然语言入口为 FastAPI `/v1/chat`；另提供单次请求 RAG Trace 调试台，可实时查看 Embedding 摘要、召回、精排、证据筛选、LLM 输入输出和引用校验。Swagger 位于 <http://127.0.0.1:8000/docs>。
 
@@ -9,7 +9,7 @@
 要求：Python 3.11、[uv](https://docs.astral.sh/uv/)、Docker Desktop。
 
 ```bash
-cp .env.example .env
+# 在本地创建 .env，并按需配置 OPENROUTER_API_KEY 等环境变量
 uv sync --group dev
 docker compose up -d
 uv run python -m app.ingestion.service --config configs/mvp.yaml

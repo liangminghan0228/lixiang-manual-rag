@@ -845,7 +845,7 @@ wheels = [
 ]
 
 [[package]]
-name = "lixiang-qdrant-rag"
+name = "lixiang-manual-rag"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

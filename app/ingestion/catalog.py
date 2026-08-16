@@ -55,7 +55,7 @@ async def fetch_catalog(url: str, timeout_seconds: float = 20.0) -> list[ManualC
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(timeout_seconds),
         follow_redirects=True,
-        headers={"User-Agent": "lixiang-qdrant-rag-learning-demo/0.2"},
+        headers={"User-Agent": "lixiang-manual-rag-learning-demo/0.2"},
     ) as client:
         response = await client.get(url)
         response.raise_for_status()

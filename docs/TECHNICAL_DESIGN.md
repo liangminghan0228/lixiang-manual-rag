@@ -1,4 +1,4 @@
-# 基于 Qdrant 的理想汽车手册中文 RAG 完整技术方案
+# 理想汽车手册中文 RAG 完整技术方案
 
 > 本文保留完整目标、选型和验收口径。主要工程能力已于 2026-08-16 实现；当前代码结构、实测指标和剩余边界以 [当前项目实现架构](CURRENT_IMPLEMENTATION_ARCHITECTURE.md) 为准，MVP 文档仅作为历史基线。
 
@@ -266,7 +266,7 @@ total_ms
 ## 8. 项目结构
 
 ```text
-lixiang-qdrant-rag/
+lixiang-manual-rag/
   app/
     domain/          # Pydantic 领域对象
     ports/           # 可替换模块的 Protocol
@@ -287,7 +287,6 @@ lixiang-qdrant-rag/
   docs/
     TECHNICAL_DESIGN.md
     MODULAR_ARCHITECTURE.md
-  .env.example
   .gitignore
   pyproject.toml
   README.md

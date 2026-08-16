@@ -1,5 +1,5 @@
 [project]
-name = "lixiang-qdrant-rag"
+name = "lixiang-manual-rag"
 version = "0.1.0"
 description = "A minimal, evidence-grounded RAG demo for Li Auto manuals."
 readme = "README.md"

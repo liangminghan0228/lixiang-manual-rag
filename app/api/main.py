@@ -47,7 +47,7 @@ def create_app(container: Container | None = None) -> FastAPI:
         yield
 
     app = FastAPI(
-        title="Li Auto Qdrant RAG MVP",
+        title="Li Auto Manual RAG",
         version="0.2.0",
         lifespan=lifespan,
     )
