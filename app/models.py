@@ -86,6 +86,13 @@ class RetrievalQuery(BaseModel):
     filters: RetrievalFilters = Field(default_factory=RetrievalFilters)
 
 
+class QueryPlan(RetrievalQuery):
+    original_query: str
+    queries: list[str] = Field(default_factory=list)
+    fusion_strategy: str = "single_query"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class SearchResult(BaseModel):
     chunk: Chunk
     score: float
@@ -98,7 +105,7 @@ class SearchResult(BaseModel):
 class RetrievalOutcome(BaseModel):
     results: list[SearchResult]
     timings_ms: dict[str, float]
-    query: RetrievalQuery | None = None
+    query: QueryPlan | RetrievalQuery | None = None
 
 
 class EvidenceBundle(BaseModel):

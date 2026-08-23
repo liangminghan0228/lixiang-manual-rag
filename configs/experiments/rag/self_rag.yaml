@@ -1,0 +1,6 @@
+extends: vanilla.yaml
+experiment:
+  id: rag-self-hybrid-reranker-v1
+rag:
+  strategy: self_rag
+  controller_model: nvidia/nemotron-3.5-content-safety:free

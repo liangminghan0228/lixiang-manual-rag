@@ -6,7 +6,7 @@
 
 项目已经从最小 Dense RAG 扩展为可替换、可评测、可观测的单体 RAG：官方车型目录发现、全车型增量入库、Dense/BM25/Hybrid 召回、可选精排、证据选择、严格引用生成、单次请求 Trace、Ragas 统一评测和并发压测均有实际代码入口。
 
-当前 Web 页面只包含面向开发者的 RAG Trace 调试台，不是终端用户产品。项目仍不包含 Agent、多租户权限、消息队列和分布式部署。自然语言问答可通过 Trace 调试台、Swagger 或 `/v1/chat` 使用。
+当前 Web 页面只包含面向开发者的 RAG Trace 调试台，不是终端用户产品。项目仍不包含多租户权限、消息队列和分布式部署；Agentic RAG 仅指当前实验内的受限策略，不是通用 Agent 平台。自然语言问答可通过 Trace 调试台、Swagger 或 `/v1/chat` 使用。
 
 ## 2. 完整运行架构
 
@@ -34,7 +34,7 @@ flowchart TB
     end
 
     subgraph RETRIEVAL["检索流水线"]
-        QUERY["IdentityQueryProcessor<br/>问题 + payload filters"]
+        QUERY["QueryProcessor 七种实现<br/>QueryPlan + payload filters"]
         DENSE["Dense Retriever<br/>BGE-M3 + Qdrant"]
         BM25["BM25 Retriever<br/>中文字符/二元词"]
         HYBRID["Hybrid Retriever<br/>RRF 融合"]
@@ -89,13 +89,22 @@ flowchart TB
 | `Chunker` | `HeadingChunker` | `data.chunker=heading` | 是 |
 | `Embedder` | BGE-M3、确定性 Hash | `bge_m3_local` / `hash_mock` | 是 |
 | `VectorStore` | Qdrant、内存实现 | `qdrant` / `in_memory` | 是 |
-| `QueryProcessor` | Identity | `identity` | 否 |
+| `QueryProcessor` | Identity、Normalize、Rewrite、Expansion、Multi-Query、HyDE、Decomposition | `retrieval.query_processor.provider` | 否 |
 | `Retriever` | Dense、BM25、Hybrid | `dense` / `bm25` / `hybrid` | 否；当前 BM25 在进程内构建 |
 | `Reranker` | NoOp、BGE v2 M3 | `noop` / `bge_local` | 否 |
-| `EvidenceSelector` | 去重和 topic 多样化 | `diversified` | 否 |
+| `EvidenceSelector` | `DiversifiedEvidenceSelector`（当前固定） | `diversified` | 否 |
+| `RagStrategy` | Vanilla、Self-RAG、Agentic RAG、document-structure GraphRAG | `rag.strategy` | 否 |
 | `Generator` | OpenRouter、Mock | `openrouter` / `mock` | 否 |
 
 装配集中在 `app/wiring.py`，显式映射在 `app/registry.py`。流水线只接收领域对象，不把 Qdrant、FlagEmbedding 或 OpenRouter SDK 类型暴露给上层。
+
+组件创建逻辑已从 `wiring.py` 的 provider 分支迁移到 `app/factories.py`：Retriever 和 Generator 都通过显式 Registry 选择，`Container` 暴露并复用同一组 QueryProcessor、候选 Retriever 和 Reranker 实例。新增实现只需满足既有 Protocol、注册 Factory 并补配置，不需要修改 API 路由。
+
+### 3.1 QueryPlan 与 RAG Strategy
+
+七种 QueryProcessor 都输出统一 `QueryPlan`。Identity/Normalize/Expansion 是确定性处理；Rewrite、Multi-Query、HyDE、Decomposition 使用固定查询规划模型，其中多查询通过 RRF 融合。各方式在独立 YAML 中互相排他，不在同一实验配置叠加。
+
+固定的“检索→证据选择→生成→引用校验”已迁移到 `VanillaRagStrategy`。当前还提供 Self-RAG、Agentic RAG 和 GraphRAG；其中 GraphRAG 是基于章节/主题邻接关系的 document-structure graph baseline，不是 entity/community GraphRAG。`ChatService` 保持原有接口，只承担服务入口与策略委派。
 
 ## 4. Qdrant collection 与字段
 
@@ -147,13 +156,15 @@ data/normalized/{manual_key}/{snapshot_id}/chunks.jsonl
 
 ## 7. 离线评测闭环
 
-项目只保留`data/eval/rag_eval_v2.jsonl`一份数据集，共50题：
+完整数据集 `data/eval/rag_eval_v2.jsonl` 共50题：
 
 - `single_chunk`：18条；
 - `multi_chunk_same_topic`：8条；
 - `multi_topic`：10条；
 - `cross_manual`：6条；
 - `unanswerable`：8条。
+
+当前快速实验套件使用由显式 ID 清单生成的 `rag_eval_v2_30.jsonl` 分层子集：10条 `single_chunk`、5条 `multi_chunk_same_topic`、6条 `multi_topic`、4条 `cross_manual` 和5条 `unanswerable`。50题全集保留用于最终确认。
 
 每条记录直接使用Ragas字段语义：`user_input`、`reference`、`reference_contexts`，并保留确定性检索标注`gold_chunk_ids`、车型过滤条件和场景标签。42条可回答问题的参考答案由冻结chunk生成，状态为`generated_reference_review_required`；人工复核前只能用于回归和方案对比。
 
@@ -170,9 +181,11 @@ data/normalized/{manual_key}/{snapshot_id}/chunks.jsonl
 
 其中`FactualCorrectness(mode="recall")`作为“完整性”：参考答案中的事实有多少被生成答案覆盖。8条不可回答问题不参与F1、MRR和三项Ragas生成分数，只计算拒答正确率。Ragas使用项目本地BGE-M3作为答案相关性所需Embedding，Judge通过OpenAI兼容接口调用固定模型；禁止使用动态`openrouter/free`。Ragas调用带磁盘缓存，结果统一输出JSON和Markdown。
 
-当前固定使用`ragas==0.4.3`，并将其兼容依赖`langchain-community`固定为`0.3.31`，避免依赖升级导致评测入口无法导入。可回答问题若发生拒答或没有检索证据，三项生成指标直接记为0，避免异常样本被排除后抬高均分。
+批量对比入口为 `scripts/run_experiments.py`：`configs/suites/query-optimization.yaml` 运行七套查询优化（默认仅检索评测），`configs/suites/rag-strategies.yaml` 运行 Vanilla + 三套 Strategy（完整评测）。两套 suite 默认使用30题分层子集，每套实验仍调用统一的 `scripts.evaluate`，结果隔离到 `reports/experiments/{suite_id}/{run_id}/`；`--dry-run` 可在加载模型前验证计划。
 
-旧的`smoke.jsonl`、`full_v1.jsonl`、`evaluate_smoke.py`、`evaluate_answers.py`及Recall/nDCG/阈值兼容逻辑已经删除。快速验证改用同一数据集的`--limit`，检索消融使用`--retrieval-only`，避免维护第二份测试集。
+当前固定使用`ragas==0.4.3`，并将其兼容依赖`langchain-community`固定为`0.3.31`，避免依赖升级导致评测入口无法导入。四个 LLM 角色当前统一固定为 `nvidia/nemotron-3.5-content-safety:free`；该模型偏内容安全分类，正式评测前仍需验证生成和 Judge 兼容性。可回答问题若发生拒答或没有检索证据，三项生成指标直接记为0，避免异常样本被排除后抬高均分。
+
+旧的`smoke.jsonl`、`full_v1.jsonl`、`evaluate_smoke.py`、`evaluate_answers.py`及Recall/nDCG/阈值兼容逻辑已经删除。快速实验子集由 `scripts.build_eval_subset` 和固定 ID 清单从50题全集重建，检索消融继续使用`--retrieval-only`。
 
 ## 8. 性能与可观测性
 
@@ -221,3 +234,5 @@ TraceStore 当前是带 TTL、最大请求数和单请求事件数限制的进�
 5. 单机内存 import job 与 metrics 不跨多 worker 共享，生产部署需外部任务状态和集中指标。
 6. 全车型问题应先确定 `manual_key`/手册版本再检索；未选择车型时，只依赖语义文本区分相似年款，存在串用风险。
 7. Trace 调试台当前只适合受信任的开发环境；完整 LLM 输入可能包含正文，尚未实现用户级鉴权与字段脱敏。
+8. 查询优化中的 LLM 方法依赖固定模型和 API key；未配置时不能宣称已完成正式质量评测。
+9. GraphRAG 当前只实现 document-structure graph baseline，不覆盖实体图谱、社区发现和全局摘要；通用 Agent、多租户和分布式能力仍不在范围内。

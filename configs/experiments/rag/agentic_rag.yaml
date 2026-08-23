@@ -1,0 +1,7 @@
+extends: vanilla.yaml
+experiment:
+  id: rag-agentic-hybrid-reranker-v1
+rag:
+  strategy: agentic_rag
+  controller_model: nvidia/nemotron-3.5-content-safety:free
+  max_steps: 4

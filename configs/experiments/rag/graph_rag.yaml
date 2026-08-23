@@ -1,0 +1,5 @@
+extends: vanilla.yaml
+experiment:
+  id: rag-graph-document-structure-v1
+rag:
+  strategy: graph_rag

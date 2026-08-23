@@ -1,6 +1,6 @@
 # 模块化 RAG 架构设计
 
-> 本文说明模块边界和替换规则。实际已装配组件、运行链路、数据量与实测结果见 [当前项目实现架构](CURRENT_IMPLEMENTATION_ARCHITECTURE.md)。文中的 Generic HTML、Recursive/Semantic Chunker、远程 Embedding 等是扩展位，不代表已经实现。
+> 本文说明模块边界和替换规则。实际已装配组件、运行链路、数据量与实测结果见 [当前项目实现架构](CURRENT_IMPLEMENTATION_ARCHITECTURE.md)。分块对比暂不属于当前实验范围。
 
 ## 1. 设计目标
 
@@ -59,10 +59,10 @@ flowchart TB
         CHUNK_IMPL["Heading<br/>Recursive / Semantic"]
         EMBED_IMPL["BGE-M3 Local<br/>Remote Embedding"]
         STORE_IMPL["Qdrant<br/>InMemory Test Store"]
-        QUERY_IMPL["Identity<br/>Rewrite / Expansion"]
+        QUERY_IMPL["Identity / Normalize<br/>Rewrite / Expansion<br/>Multi-Query / HyDE / Decomposition"]
         RETRIEVER_IMPL["Dense<br/>BM25 / Hybrid"]
         RERANK_IMPL["NoOp<br/>BGE Reranker / API"]
-        EVIDENCE_IMPL["TopK Threshold<br/>Diversified Selector"]
+        EVIDENCE_IMPL["Diversified Selector<br/>(fixed in current experiments)"]
         GENERATOR_IMPL["OpenRouter<br/>Mock / Local LLM"]
     end
 
@@ -203,11 +203,13 @@ class EvidenceBundle(BaseModel):
 | `Chunker` | Document 转 Chunk | 标题分块、递归分块、语义分块 |
 | `Embedder` | 文档和问题转向量 | 本地 BGE、远程 Embedding API |
 | `VectorStore` | 建索引、写入、查询和删除版本 | Qdrant、内存测试实现 |
-| `QueryProcessor` | 查询标准化或改写 | Identity、Query Rewrite、Multi-Query |
+| `QueryProcessor` | 查询标准化、改写或拆分 | Identity、Normalize、Rewrite、Expansion、Multi-Query、HyDE、Decomposition |
 | `Retriever` | 返回 Top-N 候选 | Dense、BM25、Hybrid |
 | `Reranker` | 对固定候选重排 | NoOp、本地 BGE、远程 Rerank API |
 | `EvidenceSelector` | 阈值、去重和证据预算 | Top-K、MMR、按 topic 多样化 |
 | `Generator` | 基于 Evidence 生成引用答案 | OpenRouter、Mock、本地 LLM |
+
+当前实验还通过 `RagStrategy` 替换问答编排：Vanilla（控制组）、Self-RAG、Agentic RAG 和 GraphRAG。GraphRAG 当前特指 document-structure graph baseline（章节/主题邻接），不包含实体抽取、社区发现或全局摘要。
 
 端口只定义业务输入输出。例如：
 
@@ -387,3 +389,15 @@ artifacts/{experiment_id}/
 - 每个阶段统一记录输入条数、输出条数、耗时、失败原因和 `component_id`。
 
 这套结构的核心不是让所有组件都能随意热插拔，而是通过少量稳定接口控制替换范围，并让每次替换都能复现、隔离和量化。
+
+## 11. 当前扩展性实施状态
+
+在保持 HeadingChunker 和现有评测指标不变的前提下，当前最终实验改造已完成：
+
+- Retriever、Generator、Embedder、VectorStore、QueryProcessor、Reranker 和 EvidenceSelector 通过显式 Registry + Factory 装配；
+- `QueryPlan` 已成为 QueryProcessor 输出契约，支持七种查询优化和 RRF 多查询融合；
+- Vanilla、Self-RAG、Agentic RAG 和 document-structure GraphRAG 均通过 Strategy 装配；
+- 实验套件运行器复用统一评测入口，按 suite/run 隔离查询优化和 Strategy 结果；
+- 评测报告显式记录 QueryProcessor、RAG Strategy 组件 ID，便于消融和复现。
+
+当前明确不在范围内的是 Chunker、EvidenceSelector、LLM/Prompt 的对比和 Web 排行榜。GraphRAG 仅为 document-structure graph baseline，不代表 entity/community GraphRAG。详细范围、验收标准和运行命令见 [最终实验设计](FINAL_EXPERIMENT_DESIGN.md) 与 [扩展性改造实施方案](EXTENSIBILITY_IMPLEMENTATION_PLAN.md)。

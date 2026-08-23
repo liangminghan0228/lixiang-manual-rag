@@ -1,0 +1,8 @@
+extends: ../hybrid_reranker.yaml
+experiment:
+  id: query-multi-query-hybrid-reranker-v1
+retrieval:
+  query_processor:
+    provider: multi_query
+    model: nvidia/nemotron-3.5-content-safety:free
+    max_queries: 4

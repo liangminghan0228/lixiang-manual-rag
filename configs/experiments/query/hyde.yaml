@@ -1,0 +1,8 @@
+extends: ../hybrid_reranker.yaml
+experiment:
+  id: query-hyde-hybrid-reranker-v1
+retrieval:
+  query_processor:
+    provider: hyde
+    model: nvidia/nemotron-3.5-content-safety:free
+    max_queries: 1

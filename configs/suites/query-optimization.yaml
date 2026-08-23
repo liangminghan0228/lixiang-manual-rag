@@ -1,0 +1,14 @@
+id: query-optimization-v1
+dataset: data/eval/rag_eval_v2_30.jsonl
+output_root: reports/experiments
+retrieval_only: true
+limit: 0
+continue_on_error: true
+configs:
+  - configs/experiments/query/identity.yaml
+  - configs/experiments/query/normalize.yaml
+  - configs/experiments/query/expansion.yaml
+  - configs/experiments/query/rewrite.yaml
+  - configs/experiments/query/multi_query.yaml
+  - configs/experiments/query/hyde.yaml
+  - configs/experiments/query/decomposition.yaml

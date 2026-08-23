@@ -1,0 +1,10 @@
+extends: ../hybrid_reranker.yaml
+experiment:
+  id: query-normalize-hybrid-reranker-v1
+retrieval:
+  query_processor:
+    provider: normalize
+    aliases:
+      车钥匙: 智能钥匙
+      没电: 电量低
+      怎么: 如何

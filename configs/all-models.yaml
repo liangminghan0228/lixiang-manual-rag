@@ -52,7 +52,7 @@ retrieval:
 
 generation:
   provider: openrouter
-  model: openrouter/free
+  model: nvidia/nemotron-3.5-content-safety:free
   mock_when_key_missing: true
   require_inline_citations: true
   citation_repair_attempts: 1

@@ -1,0 +1,13 @@
+extends: ../hybrid_reranker.yaml
+experiment:
+  id: query-expansion-hybrid-reranker-v1
+retrieval:
+  query_processor:
+    provider: expansion
+    expansions:
+      没电: [电量低, 更换电池, 提示信息]
+      车钥匙: [智能钥匙, 更换电池]
+      电量低: [更换电池, 提示信息]
+      开启: [设置入口, 激活条件]
+      关闭: [退出条件, 关闭方法]
+      检查: [注意事项, 安全警告]

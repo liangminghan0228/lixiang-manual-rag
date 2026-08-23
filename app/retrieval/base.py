@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.models import RetrievalFilters, RetrievalOutcome, RetrievalQuery, SearchResult
+from app.models import QueryPlan, RetrievalFilters, RetrievalOutcome, RetrievalQuery, SearchResult
 
 
 class QueryProcessor(Protocol):
@@ -13,7 +13,7 @@ class QueryProcessor(Protocol):
         self,
         question: str,
         filters: RetrievalFilters | None = None,
-    ) -> RetrievalQuery: ...
+    ) -> QueryPlan: ...
 
 
 class Retriever(Protocol):

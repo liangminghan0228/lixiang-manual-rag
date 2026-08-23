@@ -1,0 +1,11 @@
+extends: ../hybrid_reranker.yaml
+experiment:
+  id: rag-vanilla-hybrid-reranker-v1
+retrieval:
+  query_processor: identity
+generation:
+  provider: openrouter
+  model: nvidia/nemotron-3.5-content-safety:free
+  mock_when_key_missing: false
+rag:
+  strategy: vanilla

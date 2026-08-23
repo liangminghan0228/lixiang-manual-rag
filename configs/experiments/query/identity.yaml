@@ -1,0 +1,5 @@
+extends: ../hybrid_reranker.yaml
+experiment:
+  id: query-identity-hybrid-reranker-v1
+retrieval:
+  query_processor: identity

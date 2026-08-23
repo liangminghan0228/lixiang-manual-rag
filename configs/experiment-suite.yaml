@@ -1,0 +1,12 @@
+id: retrieval-baselines-v1
+dataset: data/eval/rag_eval_v2.jsonl
+output_root: reports/experiments
+retrieval_only: true
+limit: 0
+continue_on_error: true
+configs:
+  - configs/experiments/dense.yaml
+  - configs/experiments/bm25.yaml
+  - configs/experiments/hybrid.yaml
+  - configs/experiments/dense_reranker.yaml
+  - configs/experiments/hybrid_reranker.yaml

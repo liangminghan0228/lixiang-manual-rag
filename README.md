@@ -18,7 +18,7 @@ APP_CONFIG=configs/mvp.yaml uv run uvicorn app.api.main:app --reload
 
 服务启动后打开 <http://127.0.0.1:8000/trace-console> 使用 Trace 调试台。调试台先通过 `POST /v1/traces` 创建请求，再从 `GET /v1/traces/{trace_id}/events` 接收 SSE 事件；`GET /v1/traces/{trace_id}` 用于刷新和断线后的快照恢复。
 
-`OPENROUTER_API_KEY` 未配置时，按配置可回退到 Mock Generator；真实评测应在 `.env` 固定 `OPENROUTER_MODEL`，不要长期使用会动态路由的 `openrouter/free`。BGE 模型采用懒加载，第一次检索会明显慢于热请求。
+`OPENROUTER_API_KEY` 未配置时，按配置可回退到 Mock Generator。当前四个 LLM 角色统一固定为 `nvidia/nemotron-3.5-content-safety:free`；BGE 模型采用懒加载，第一次检索会明显慢于热请求。
 
 ## API
 
@@ -42,19 +42,43 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
 # 从已解析的全车型 chunks 生成唯一的 50 题数据集
 uv run python -m scripts.build_eval_dataset
 
+# 从50题全集生成当前实验使用的30题分层子集
+uv run python -m scripts.build_eval_subset \
+  --spec configs/eval-subsets/rag_eval_v2_30.yaml
+
 # 不调用 LLM Judge，只验证检索 F1@5、MRR@10
 uv run python -m scripts.evaluate \
   --config configs/experiments/dense.yaml --retrieval-only
+
+# 批量运行当前查询优化对比；先检查命令，再正式运行
+uv run python -m scripts.run_experiments \
+  --suite configs/suites/query-optimization.yaml --dry-run
+uv run python -m scripts.run_experiments \
+  --suite configs/suites/query-optimization.yaml
+
+# 批量运行 RAG Strategy 对比（Vanilla 为控制组）
+uv run python -m scripts.run_experiments \
+  --suite configs/suites/rag-strategies.yaml --dry-run
+uv run python -m scripts.run_experiments \
+  --suite configs/suites/rag-strategies.yaml
 
 # 完整评测：在 .env 中固定 OPENROUTER_MODEL 和 RAGAS_JUDGE_MODEL
 uv run python -m scripts.evaluate --config configs/all-models.yaml
 ```
 
-`rag_eval_v2.jsonl` 是唯一评测集，共50题：18个单chunk、8个同topic多chunk、10个跨topic、6个跨车型/年款、8个不可回答问题。检索计算F1@5和MRR@10；生成侧由Ragas计算忠实度、答案相关性和完整性，不可回答问题单独计算拒答正确率。42个可回答样本的参考答案由冻结chunk生成，人工复核前只用于回归和横向实验。
+完整评测集 `rag_eval_v2.jsonl` 共50题：18个单chunk、8个同topic多chunk、10个跨topic、6个跨车型/年款、8个不可回答问题。当前快速实验使用30题分层子集 `rag_eval_v2_30.jsonl`：10、5、6、4、5题，其中25题可回答、5题不可回答。子集 ID 固定在 `configs/eval-subsets/rag_eval_v2_30.yaml`；不要直接设置 `limit: 30`，否则会因原数据按题型排序而丢失后半部分题型。
+
+检索计算F1@5和MRR@10；生成侧由Ragas计算忠实度、答案相关性和完整性，不可回答问题单独计算拒答正确率。参考答案由冻结chunk生成，人工复核前只用于回归和横向实验。
 
 Ragas Judge必须使用固定模型，不能使用动态路由的`openrouter/free`。可设置`RAGAS_JUDGE_API_KEY`单独使用评审密钥；未设置时复用`OPENROUTER_API_KEY`。报告统一输出为`reports/evaluation/rag-eval-v2.json`和同名Markdown。
 
-已提供 Dense、BM25、Hybrid、Dense + Reranker、Hybrid + Reranker 配置。更换 Chunker 或 Embedding 必须使用新 collection；只切 Retriever/Reranker/Generator 可以复用现有向量。
+当前实验范围是七种查询优化（Identity、Normalize、Rewrite、Expansion、Multi-Query、HyDE、Decomposition）和三种 RAG Strategy（Self-RAG、Agentic RAG、GraphRAG）；Vanilla 仅作为控制组。EvidenceSelector 固定 `DiversifiedEvidenceSelector`，LLM/Prompt 和 Chunker 不做对比。更换 Chunker 或 Embedding 必须使用新 collection；只切 QueryProcessor、Retriever、Reranker、Generator 或 RAG Strategy 可以复用现有向量。
+
+其中 GraphRAG 当前是基于章节/主题邻接关系的 document-structure graph baseline，不是实体抽取、社区发现或全局摘要型 GraphRAG。当前 Query Optimizer、Generator、Controller 和 Ragas Judge 都固定为 `nvidia/nemotron-3.5-content-safety:free`，不再使用动态路由的 `openrouter/free`。
+
+注意：该模型是内容安全分类/护栏模型，不是通用问答或 Judge 模型；OpenRouter 也未声明其支持 `response_format`。此配置满足“固定同一免费模型”的实验控制要求，但正式全链路运行前必须先验证查询 JSON、答案生成和 Ragas Judge 兼容性。
+
+批量实验在 `reports/experiments/{suite_id}/{run_id}/` 下为每个配置保存独立 JSON/Markdown 报告，并写入 `suite-manifest.json`，避免连续实验覆盖结果。当前批量配置使用30题分层子集，指标实现不变；最终确认时可以把 suite 的 `dataset` 切回50题全集。
 
 ## 全车型手册采集
 
@@ -117,5 +141,7 @@ docker compose --profile observability config --quiet
 - [当前实现架构](docs/CURRENT_IMPLEMENTATION_ARCHITECTURE.md)
 - [完整技术方案与实现状态](docs/TECHNICAL_DESIGN.md)
 - [模块替换与实验隔离规则](docs/MODULAR_ARCHITECTURE.md)
+- [扩展性改造实施方案](docs/EXTENSIBILITY_IMPLEMENTATION_PLAN.md)
+- [最终实验设计](docs/FINAL_EXPERIMENT_DESIGN.md)
 - [MVP 历史基线](docs/MVP_TECHNICAL_DESIGN.md)
 - [本机短压测记录](reports/performance/README.md)

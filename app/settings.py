@@ -4,11 +4,12 @@ import os
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "configs" / "mvp.yaml"
+DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3.5-content-safety:free"
 
 
 class DataSettings(BaseModel):
@@ -60,9 +61,19 @@ class RerankerSettings(BaseModel):
     use_fp16: bool = False
 
 
+class QueryProcessorSettings(BaseModel):
+    provider: str = "identity"
+    model: str | None = None
+    base_url: str = "https://openrouter.ai/api/v1"
+    timeout_seconds: float = Field(default=30.0, gt=0)
+    max_queries: int = Field(default=4, ge=1, le=8)
+    aliases: dict[str, str] = Field(default_factory=dict)
+    expansions: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class RetrievalSettings(BaseModel):
     provider: str = "dense"
-    query_processor: str = "identity"
+    query_processor: QueryProcessorSettings = Field(default_factory=QueryProcessorSettings)
     top_k: int = 5
     candidate_top_k: int = 10
     evidence_top_k: int = 3
@@ -73,6 +84,13 @@ class RetrievalSettings(BaseModel):
     bm25_k1: float = 1.5
     bm25_b: float = 0.75
     rrf_k: int = 60
+
+    @field_validator("query_processor", mode="before")
+    @classmethod
+    def normalize_query_processor(cls, value: object) -> object:
+        if isinstance(value, str):
+            return {"provider": value}
+        return value
 
     @model_validator(mode="after")
     def validate_top_k(self) -> RetrievalSettings:
@@ -89,12 +107,18 @@ class RetrievalSettings(BaseModel):
 
 class GenerationSettings(BaseModel):
     provider: str = "openrouter"
-    model: str = "openrouter/free"
+    model: str = DEFAULT_OPENROUTER_MODEL
     mock_when_key_missing: bool = True
     timeout_seconds: float = 60.0
     temperature: float = 0.0
     require_inline_citations: bool = True
     citation_repair_attempts: int = 1
+
+
+class RagSettings(BaseModel):
+    strategy: str = "vanilla"
+    controller_model: str | None = None
+    max_steps: int = Field(default=4, ge=1, le=12)
 
 
 class ExperimentSettings(BaseModel):
@@ -122,6 +146,7 @@ class AppSettings(BaseModel):
     vector_store: VectorStoreSettings
     retrieval: RetrievalSettings
     generation: GenerationSettings
+    rag: RagSettings = Field(default_factory=RagSettings)
     experiment: ExperimentSettings = Field(default_factory=ExperimentSettings)
     monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
     tracing: TracingSettings = Field(default_factory=TracingSettings)
@@ -135,16 +160,58 @@ class RuntimeEnvironment(BaseSettings):
     )
 
     openrouter_api_key: str | None = None
-    openrouter_model: str | None = None
+    openrouter_model: str | None = DEFAULT_OPENROUTER_MODEL
     ragas_judge_api_key: str | None = None
-    ragas_judge_model: str | None = None
+    ragas_judge_model: str | None = DEFAULT_OPENROUTER_MODEL
     ragas_judge_base_url: str = "https://openrouter.ai/api/v1"
+    query_optimizer_api_key: str | None = None
+    query_optimizer_model: str | None = DEFAULT_OPENROUTER_MODEL
+    rag_controller_model: str | None = DEFAULT_OPENROUTER_MODEL
     qdrant_url: str | None = None
     qdrant_collection: str | None = None
 
 
 def _resolve_project_path(path: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def _deep_merge(base: dict[str, object], override: dict[str, object]) -> dict[str, object]:
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(current, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_config_tree(path: Path, seen: set[Path] | None = None) -> dict[str, object]:
+    resolved = path.resolve()
+    visited = set(seen or ())
+    if resolved in visited:
+        raise ValueError(f"cyclic config inheritance detected at {resolved}")
+    visited.add(resolved)
+    raw = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"config root must be an object: {resolved}")
+    parent_value = raw.pop("extends", None)
+    if parent_value is None:
+        return raw
+    if not isinstance(parent_value, str) or not parent_value.strip():
+        raise ValueError(f"extends must be a non-empty path: {resolved}")
+    parent = Path(parent_value)
+    if not parent.is_absolute():
+        parent = resolved.parent / parent
+    return _deep_merge(_load_config_tree(parent, visited), raw)
+
+
+def load_config_data(config_path: str | Path) -> dict[str, object]:
+    """Load a YAML config with inheritance, without constructing runtime components."""
+    selected = Path(config_path)
+    if not selected.is_absolute():
+        selected = PROJECT_ROOT / selected
+    return _load_config_tree(selected)
 
 
 def load_settings(
@@ -155,7 +222,7 @@ def load_settings(
     selected = Path(config_path or os.getenv("APP_CONFIG", DEFAULT_CONFIG_PATH))
     if not selected.is_absolute():
         selected = PROJECT_ROOT / selected
-    raw = yaml.safe_load(selected.read_text(encoding="utf-8")) or {}
+    raw = load_config_data(selected)
     settings = AppSettings.model_validate(raw)
     runtime = RuntimeEnvironment()
 

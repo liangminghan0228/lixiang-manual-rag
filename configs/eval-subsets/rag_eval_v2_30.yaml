@@ -1,0 +1,39 @@
+id: rag-eval-v2-stratified-30
+source: data/eval/rag_eval_v2.jsonl
+output: data/eval/rag_eval_v2_30.jsonl
+selected_ids:
+  # single_chunk: 10
+  - single-001
+  - single-003
+  - single-005
+  - single-007
+  - single-009
+  - single-010
+  - single-012
+  - single-014
+  - single-016
+  - single-018
+  # multi_chunk_same_topic: 5
+  - same-topic-001
+  - same-topic-003
+  - same-topic-005
+  - same-topic-006
+  - same-topic-008
+  # multi_topic: 6
+  - multi-topic-001
+  - multi-topic-003
+  - multi-topic-005
+  - multi-topic-006
+  - multi-topic-008
+  - multi-topic-010
+  # cross_manual: 4
+  - cross-manual-001
+  - cross-manual-003
+  - cross-manual-004
+  - cross-manual-006
+  # unanswerable: 5
+  - unanswerable-001
+  - unanswerable-003
+  - unanswerable-005
+  - unanswerable-006
+  - unanswerable-008

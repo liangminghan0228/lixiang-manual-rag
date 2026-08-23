@@ -139,6 +139,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 max_k,
                 case.retrieval_filters,
             )
+            detail["retrieval_timings_ms"] = dict(outcome.timings_ms)
             detail["retrieved"] = [
                 {
                     "chunk_id": result.chunk.chunk_id,
@@ -180,7 +181,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         details.append(detail)
 
     if ragas_samples:
-        EvaluationDataset(samples=ragas_samples).validate_samples()
+        evaluation_dataset = EvaluationDataset(samples=ragas_samples)
+        evaluation_dataset.validate_samples(evaluation_dataset.samples)
     report = {
         "generated_at": datetime.now(UTC).isoformat(),
         "experiment_id": container.settings.experiment.id,
@@ -191,9 +193,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "label_status_counts": dict(Counter(case.label_status for case in cases)),
         "components": {
             "embedder": container.embedder.component_id,
+            "query_processor": container.query_processor.component_id,
             "retriever": container.retriever.component_id,
             "reranker": container.reranker.component_id,
             "generator": container.generator.component_id,
+            "rag_strategy": container.rag_strategy.component_id,
         },
         "metric_contract": {
             "retrieval": [f"f1@{RETRIEVAL_F1_K}", f"mrr@{RETRIEVAL_MRR_K}"],

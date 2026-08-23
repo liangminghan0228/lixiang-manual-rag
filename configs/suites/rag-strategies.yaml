@@ -1,0 +1,11 @@
+id: rag-strategies-v1
+dataset: data/eval/rag_eval_v2_30.jsonl
+output_root: reports/experiments
+retrieval_only: false
+limit: 0
+continue_on_error: true
+configs:
+  - configs/experiments/rag/vanilla.yaml
+  - configs/experiments/rag/self_rag.yaml
+  - configs/experiments/rag/agentic_rag.yaml
+  - configs/experiments/rag/graph_rag.yaml
