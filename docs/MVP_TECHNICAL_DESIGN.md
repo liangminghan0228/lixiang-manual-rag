@@ -25,7 +25,7 @@ MVP 要回答三个问题：
 - OpenRouter 或 Mock Generator；
 - `/v1/retrieve`、`/v1/chat`、`/health`；
 - 答案引用、无证据拒答和分阶段耗时；
-- 20 条离线冒烟问题及 Recall@5。
+- 单一50题数据集；MVP阶段用`--limit`执行检索F1@5和MRR@10。
 
 ### 2.2 本期不实现
 
@@ -286,7 +286,7 @@ QDRANT_URL=http://localhost:6333
 
 优先级：环境变量覆盖 YAML。API Key 为空时自动装配 Mock Generator，保证采集和检索开发不被外部 API 阻塞。
 
-`min_score` 不预先写死：先用 15 条可回答问题和 5 条知识库外问题收集分数分布，再选取兼顾召回和拒答的阈值，并把最终值写回配置。评测脚本输出 Recall@5 和基于平衡准确率的建议阈值；阈值只表示是否存在候选证据，不代表答案正确率。
+`min_score`不预先写死。当前统一评测不再保留独立阈值校准脚本：检索使用F1@5和MRR@10，生成使用Ragas忠实度、答案相关性、完整性，不可回答问题单独统计拒答正确率。
 
 ## 10. 项目目录
 
@@ -317,11 +317,11 @@ configs/mvp.yaml
 data/
   raw/
   normalized/
-  eval/smoke.jsonl
+  eval/rag_eval_v2.jsonl
 tests/
   unit/
   integration/
-scripts/evaluate_smoke.py
+scripts/evaluate.py
 compose.yaml
 pyproject.toml
 ```
@@ -355,8 +355,8 @@ pyproject.toml
 
 ### M4：冒烟评测
 
-- 标注 20 条问题，其中至少 5 条不可回答；
-- 输出 Recall@5、引用检查和阶段耗时；
+- 从唯一50题数据集选择少量问题快速验证；
+- 输出F1@5、MRR@10和阶段耗时；
 - 根据结果校准 `min_score`。
 
 ## 12. 验收标准
@@ -368,7 +368,7 @@ MVP 完成必须同时满足：
 3. `/v1/retrieve` 返回正文、相似度、rank 和原始 URL；
 4. `/v1/chat` 的关键结论带引用，引用能打开原 topic；
 5. 无合格证据时不调用真实 LLM，直接拒答；
-6. 20 条冻结问题可以重复执行并输出 Recall@5；
+6. 统一50题数据集可重复执行并输出F1@5、MRR@10；
 7. 响应分别记录 Embedding、Qdrant、LLM 和总耗时；
 8. 单元测试不依赖网络、Qdrant 或 OpenRouter。
 

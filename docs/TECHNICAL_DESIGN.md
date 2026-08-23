@@ -11,8 +11,8 @@
 | BGE-M3 + Qdrant Dense 检索与 payload filter | 已实现并通过真实 Qdrant 集成测试 |
 | BM25、Hybrid RRF、BGE Reranker | 已实现，提供独立实验配置与离线报告 |
 | EvidenceSelector、chunk 级引用、引用修复/拒答 | 已实现 |
-| 100 条单/多证据/不可回答分层集 | 已生成；85 条答案内容待人工复核 |
-| Recall、MRR、nDCG、证据组覆盖、答案与引用评测 | 已实现 |
+| 唯一50题宽类型评测集 | 已生成；42条自动参考答案待人工复核 |
+| 检索F1/MRR + Ragas生成评测 | 已实现统一入口；完整真实Judge实验待执行 |
 | 增量抓取、跨手册 Embedding 缓存、陈旧 point 删除、Run Manifest | 已实现；首轮跨年款缓存命中率75.4% |
 | Locust、Prometheus、Grafana、隔离合成数据工具 | 已实现并完成 5 并发短基线 |
 | 单次请求 RAG Trace 调试台 | 已实现；SSE 展示 Embedding 摘要、召回、精排、证据、LLM 和引用链路 |
@@ -203,26 +203,27 @@ LLM 约束：
 
 ## 6. 离线质量评测
 
-先人工构造 100 条中文问题，覆盖事实查询、操作步骤、条件限制、警告事项、跨章节问题、同义改写和 15～20 条知识库外问题。每条记录：
+只维护一份50题数据集，覆盖单chunk、同topic多chunk、跨topic、跨车型/年款和不可回答问题，并用标签覆盖事实、操作、安全、条件、参数、对比和总结场景。每条记录：
 
 ```json
 {
   "id": "q001",
-  "question": "驾驶前需要检查什么？",
-  "vehicle_model": "理想i8",
-  "gold_topic_ids": ["topic-2025-7386992B"],
+  "user_input": "驾驶前需要检查什么？",
+  "reference": "驾驶前应检查……",
+  "reference_contexts": ["手册原文……"],
   "gold_chunk_ids": ["..."],
-  "answer_points": ["车灯", "车辆周边", "车窗和后视镜"],
-  "answerable": true
+  "answerable": true,
+  "retrieval_filters": {"manual_keys": ["W022025ULTRA"]},
+  "tags": ["operation", "safety"]
 }
 ```
 
-分开评估两层：
+一次运行同时评估两层：
 
-1. 检索层：Recall@5、Recall@10、MRR@10、nDCG@10。
-2. 回答层：引用正确率、答案要点覆盖率、无依据陈述率、知识库外问题拒答率。
+1. 检索层：基于gold chunk ID计算Precision@5、Recall@5、F1@5和MRR@10。
+2. 生成层：Ragas `Faithfulness`评估忠实度，`AnswerRelevancy`评估答案相关性，`FactualCorrectness(mode="recall")`评估完整性；不可回答问题单独计算拒答正确率。
 
-建议验收目标，不作为预先承诺的结果：Recall@5 ≥ 0.85、引用正确率 ≥ 0.95、知识库外问题拒答率 ≥ 0.90。任何指标都要附评测集规模、版本和判分规则。
+Ragas Judge和Generator必须固定模型，报告保存数据集版本、组件ID、模型、逐题结果和错误。自动生成的42条参考答案经人工复核后才能设正式验收阈值；任何指标都必须附数据集规模、版本和判分规则。
 
 对比实验只保留三组：
 
@@ -281,7 +282,7 @@ lixiang-manual-rag/
     raw/             # 原始快照，不提交 Git
     normalized/      # topic/chunk JSONL，不提交 Git
     eval/            # eval.jsonl
-  evaluation/        # evaluate_retrieval.py、evaluate_answers.py
+  scripts/evaluate.py # 单次检索 + 生成 + Ragas统一评测
   loadtest/          # locustfile.py、synthetic_loader.py
   infra/             # compose.yaml、prometheus.yml
   docs/
@@ -312,8 +313,9 @@ lixiang-manual-rag/
 
 ### 阶段四：质量评测
 
-- 建立 100 条冻结问答集。
-- 输出基线、reranker 和 chunk 消融对比报告。
+- 建立唯一的50题宽类型冻结数据集。
+- 输出检索F1@5、MRR@10及Ragas忠实度、答案相关性、完整性报告。
+- 快速测试使用同一数据集的`--limit`，不维护第二份smoke数据。
 
 ### 阶段五：性能评测
 

@@ -1,10 +1,10 @@
 # 当前项目实现架构
 
-> 更新时间：2026-08-16。本文描述当前代码真实实现；`MVP_*` 文档保留最初最小版本，`TECHNICAL_DESIGN.md` 保留完整目标和设计依据。
+> 更新时间：2026-08-23。本文描述当前代码真实实现；`MVP_*` 文档保留最初最小版本，`TECHNICAL_DESIGN.md` 保留完整目标和设计依据。
 
 ## 1. 当前结论
 
-项目已经从最小 Dense RAG 扩展为可替换、可评测、可观测的单体 RAG：官方车型目录发现、全车型增量入库、Dense/BM25/Hybrid 召回、可选精排、证据选择、严格引用生成、单次请求 Trace、离线分层评测和并发压测均有实际代码入口。
+项目已经从最小 Dense RAG 扩展为可替换、可评测、可观测的单体 RAG：官方车型目录发现、全车型增量入库、Dense/BM25/Hybrid 召回、可选精排、证据选择、严格引用生成、单次请求 Trace、Ragas 统一评测和并发压测均有实际代码入口。
 
 当前 Web 页面只包含面向开发者的 RAG Trace 调试台，不是终端用户产品。项目仍不包含 Agent、多租户权限、消息队列和分布式部署。自然语言问答可通过 Trace 调试台、Swagger 或 `/v1/chat` 使用。
 
@@ -14,7 +14,7 @@
 flowchart TB
     USER["用户 / Swagger / 调用方"]
     TRACE_UI["RAG Trace 调试台<br/>阶段时间线 + 输入输出"]
-    CLI["入库与评测 CLI"]
+    CLI["入库与统一评测 CLI"]
     LOCUST["Locust 并发压测"]
     API["FastAPI<br/>health / retrieve / chat / traces / import / metrics"]
     TRACE_STORE["内存 TraceStore<br/>事件、结果、TTL"]
@@ -51,6 +51,8 @@ flowchart TB
 
     QDRANT[("Qdrant<br/>vector + payload")]
     OPENROUTER["OpenRouter API"]
+    RAGAS["Ragas Judge<br/>忠实度 / 相关性 / 完整性"]
+    EVAL["Evaluation Runner<br/>F1@5 / MRR@10"]
     PROM["Prometheus"]
     GRAFANA["Grafana"]
     REPORTS["评测报告 + Run Manifest"]
@@ -61,6 +63,7 @@ flowchart TB
     API --> TRACE_STORE
     TRACE_STORE -->|"SSE"| TRACE_UI
     CLI --> CATALOG --> CRAWLER --> RAW --> PARSER --> DOC --> CHUNKER --> CHUNKS --> EMBED_DOC --> SYNC --> QDRANT
+    CLI --> EVAL --> QUERY
     API --> QUERY
     QUERY --> DENSE
     QUERY --> BM25
@@ -72,6 +75,7 @@ flowchart TB
     GEN --> OPENROUTER
     GEN --> VALIDATE -->|"无有效引用"| REPAIR --> VALIDATE
     VALIDATE -->|"通过"| ANSWER --> USER
+    ANSWER --> EVAL --> RAGAS --> REPORTS
     VALIDATE -->|"仍失败"| REFUSE["保守拒答"] --> USER
     LOCUST --> API
     API --> PROM --> GRAFANA
@@ -143,24 +147,32 @@ data/normalized/{manual_key}/{snapshot_id}/chunks.jsonl
 
 ## 7. 离线评测闭环
 
-`data/eval/full_v1.jsonl` 使用证据组表达“一个答案必须覆盖多份证据”：
+项目只保留`data/eval/rag_eval_v2.jsonl`一份数据集，共50题：
 
-- `single_chunk`：55 条；
-- `multi_chunk_same_topic`：20 条；
-- `multi_topic`：10 条；
-- `unanswerable`：15 条。
+- `single_chunk`：18条；
+- `multi_chunk_same_topic`：8条；
+- `multi_topic`：10条；
+- `cross_manual`：6条；
+- `unanswerable`：8条。
 
-可回答问题计算 Recall@5/10、MRR@10、去重证据组后的 nDCG@10、证据组覆盖率和全部证据命中率；不可回答问题只参与证据阈值校准。答案侧计算答案要点覆盖、引用正确性、引用格式与拒答正确性。
+每条记录直接使用Ragas字段语义：`user_input`、`reference`、`reference_contexts`，并保留确定性检索标注`gold_chunk_ids`、车型过滤条件和场景标签。42条可回答问题的参考答案由冻结chunk生成，状态为`generated_reference_review_required`；人工复核前只能用于回归和方案对比。
 
-重要边界：85 条可回答问题由冻结 chunk 结构化生成，证据 ID 已校验，但问题自然度、答案要点和同义表达仍需人工逐条复核。当前报告是模块对比基线，不是正式准确率。
+统一入口`scripts/evaluate.py`对每个问题只执行一次检索和一次生成：
 
-本次本机结果：
+```text
+同一次 Top-10 检索
+  -> gold chunk ID 计算 Precision@5 / Recall@5 / F1@5 / MRR@10
+  -> EvidenceSelector 选择实际 LLM 上下文
+  -> Generator 生成带引用答案
+  -> Ragas SingleTurnSample
+  -> Faithfulness / AnswerRelevancy / FactualCorrectness(mode=recall)
+```
 
-| Retriever | Recall@5 | MRR@10 | nDCG@10 | All-groups@10 |
-|---|---:|---:|---:|---:|
-| BM25 | 0.947 | 0.767 | 0.811 | 0.976 |
-| Dense | 0.965 | 0.857 | 0.880 | 1.000 |
-| Hybrid RRF | 0.971 | 0.892 | 0.906 | 1.000 |
+其中`FactualCorrectness(mode="recall")`作为“完整性”：参考答案中的事实有多少被生成答案覆盖。8条不可回答问题不参与F1、MRR和三项Ragas生成分数，只计算拒答正确率。Ragas使用项目本地BGE-M3作为答案相关性所需Embedding，Judge通过OpenAI兼容接口调用固定模型；禁止使用动态`openrouter/free`。Ragas调用带磁盘缓存，结果统一输出JSON和Markdown。
+
+当前固定使用`ragas==0.4.3`，并将其兼容依赖`langchain-community`固定为`0.3.31`，避免依赖升级导致评测入口无法导入。可回答问题若发生拒答或没有检索证据，三项生成指标直接记为0，避免异常样本被排除后抬高均分。
+
+旧的`smoke.jsonl`、`full_v1.jsonl`、`evaluate_smoke.py`、`evaluate_answers.py`及Recall/nDCG/阈值兼容逻辑已经删除。快速验证改用同一数据集的`--limit`，检索消融使用`--retrieval-only`，避免维护第二份测试集。
 
 ## 8. 性能与可观测性
 
@@ -202,8 +214,8 @@ TraceStore 当前是带 TTL、最大请求数和单请求事件数限制的进�
 
 已实现但仍需继续验证的事项：
 
-1. 人工复核 85 条可回答样本后冻结 `eval_dataset_version`；
-2. 固定具体 OpenRouter 模型，再跑答案质量与真实 LLM 并发；
+1. 人工复核42条可回答样本的自然度和参考答案后冻结`eval_dataset_version`；
+2. 固定具体Generator与Ragas Judge模型，再执行50题完整生成评测；
 3. 在 10k/100k/1m 合成 collection 上执行容量曲线；
 4. BM25 当前每次请求从 Qdrant 拉取并在进程内计算，仅适合学习和小数据对比；规模化时替换为持久化稀疏索引；
 5. 单机内存 import job 与 metrics 不跨多 worker 共享，生产部署需外部任务状态和集中指标。

@@ -136,6 +136,9 @@ class RuntimeEnvironment(BaseSettings):
 
     openrouter_api_key: str | None = None
     openrouter_model: str | None = None
+    ragas_judge_api_key: str | None = None
+    ragas_judge_model: str | None = None
+    ragas_judge_base_url: str = "https://openrouter.ai/api/v1"
     qdrant_url: str | None = None
     qdrant_collection: str | None = None
 

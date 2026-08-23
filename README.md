@@ -39,16 +39,20 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
 ## 离线质量评测
 
 ```bash
-uv run python -m scripts.evaluate_smoke \
-  --config configs/experiments/dense.yaml \
-  --dataset data/eval/full_v1.jsonl \
-  --top-k 10 --also-k 5 \
-  --output reports/evaluation/dense-full-v1.json
+# 从已解析的全车型 chunks 生成唯一的 50 题数据集
+uv run python -m scripts.build_eval_dataset
 
-uv run python -m scripts.evaluate_answers --limit 10
+# 不调用 LLM Judge，只验证检索 F1@5、MRR@10
+uv run python -m scripts.evaluate \
+  --config configs/experiments/dense.yaml --retrieval-only
+
+# 完整评测：在 .env 中固定 OPENROUTER_MODEL 和 RAGAS_JUDGE_MODEL
+uv run python -m scripts.evaluate --config configs/all-models.yaml
 ```
 
-`full_v1.jsonl` 共 100 条：55 个单 chunk、20 个同 topic 多 chunk、10 个跨 topic、15 个不可回答问题。85 个可回答样本的证据结构已校验，但答案内容仍标记为 `content_review_required`；人工复核前，报告只用于调试和横向实验，不能作为正式准确率。
+`rag_eval_v2.jsonl` 是唯一评测集，共50题：18个单chunk、8个同topic多chunk、10个跨topic、6个跨车型/年款、8个不可回答问题。检索计算F1@5和MRR@10；生成侧由Ragas计算忠实度、答案相关性和完整性，不可回答问题单独计算拒答正确率。42个可回答样本的参考答案由冻结chunk生成，人工复核前只用于回归和横向实验。
+
+Ragas Judge必须使用固定模型，不能使用动态路由的`openrouter/free`。可设置`RAGAS_JUDGE_API_KEY`单独使用评审密钥；未设置时复用`OPENROUTER_API_KEY`。报告统一输出为`reports/evaluation/rag-eval-v2.json`和同名Markdown。
 
 已提供 Dense、BM25、Hybrid、Dense + Reranker、Hybrid + Reranker 配置。更换 Chunker 或 Embedding 必须使用新 collection；只切 Retriever/Reranker/Generator 可以复用现有向量。
 

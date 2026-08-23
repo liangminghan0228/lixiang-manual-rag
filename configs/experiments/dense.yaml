@@ -10,7 +10,7 @@ embedding:
 vector_store:
   provider: qdrant
   url: http://localhost:6333
-  collection: lixiang_mvp_bge_m3_v1
+  collection: lixiang_all_manuals_bge_m3_v1
 retrieval:
   provider: dense
   top_k: 5

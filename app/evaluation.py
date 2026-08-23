@@ -1,110 +1,96 @@
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Iterable
-from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Protocol
 
-from pydantic import BaseModel, Field
+from openai import AsyncOpenAI
+from pydantic import BaseModel, Field, model_validator
+from ragas.cache import DiskCacheBackend
+from ragas.dataset_schema import SingleTurnSample
+from ragas.embeddings.base import BaseRagasEmbedding
+from ragas.llms import llm_factory
+from ragas.metrics.collections import AnswerRelevancy, FactualCorrectness, Faithfulness
 
-from app.models import Answer, SearchResult
+from app.models import Answer, RetrievalFilters, SearchResult
+from app.retrieval.embedder import Embedder
 
-
-class EvidenceGroup(BaseModel):
-    id: str
-    acceptable_chunk_ids: list[str] = Field(default_factory=list)
-    acceptable_topic_ids: list[str] = Field(default_factory=list)
-
-
-class AnswerPoint(BaseModel):
-    id: str
-    text: str
-    keywords: list[str] = Field(default_factory=list)
-    required_evidence_groups: list[str] = Field(default_factory=list)
+RETRIEVAL_F1_K = 5
+RETRIEVAL_MRR_K = 10
 
 
 class EvaluationCase(BaseModel):
     id: str
-    question: str
-    question_type: str = "single_chunk"
+    user_input: str = Field(min_length=1)
+    question_type: str
     answerable: bool = True
-    gold_topic_ids: list[str] = Field(default_factory=list)
+    reference: str = Field(min_length=1)
+    reference_contexts: list[str] = Field(default_factory=list)
     gold_chunk_ids: list[str] = Field(default_factory=list)
-    required_evidence_groups: list[EvidenceGroup] = Field(default_factory=list)
-    answer_points: list[AnswerPoint] = Field(default_factory=list)
-    label_status: str = "reviewed"
+    retrieval_filters: RetrievalFilters = Field(default_factory=RetrievalFilters)
+    tags: list[str] = Field(default_factory=list)
+    label_status: str = "reference_review_required"
 
-    def evidence_groups(self) -> list[EvidenceGroup]:
-        if self.required_evidence_groups:
-            return self.required_evidence_groups
-        if self.gold_chunk_ids or self.gold_topic_ids:
-            return [
-                EvidenceGroup(
-                    id="legacy-gold",
-                    acceptable_chunk_ids=self.gold_chunk_ids,
-                    acceptable_topic_ids=self.gold_topic_ids,
-                )
-            ]
-        return []
+    @model_validator(mode="after")
+    def validate_gold_evidence(self) -> EvaluationCase:
+        if self.answerable and (not self.gold_chunk_ids or not self.reference_contexts):
+            raise ValueError("answerable cases require gold_chunk_ids and reference_contexts")
+        if not self.answerable and (self.gold_chunk_ids or self.reference_contexts):
+            raise ValueError("unanswerable cases must not contain gold evidence")
+        return self
 
 
 class RetrievalCaseMetrics(BaseModel):
     case_id: str
     question_type: str
+    precision_at_k: float
     recall_at_k: float
+    f1_at_k: float
     reciprocal_rank: float
-    ndcg_at_k: float
-    group_coverage_at_k: float
-    all_groups_hit_at_k: float
     retrieved_chunk_ids: list[str]
-    retrieved_topic_ids: list[str]
 
 
-def _matches_group(result: SearchResult, group: EvidenceGroup) -> bool:
-    return result.chunk.chunk_id in group.acceptable_chunk_ids or (
-        result.chunk.topic_id in group.acceptable_topic_ids
-    )
+class GenerationCaseMetrics(BaseModel):
+    faithfulness: float | None = None
+    answer_relevancy: float | None = None
+    completeness: float | None = None
+    refusal_correct: bool | None = None
 
 
 def evaluate_retrieval_case(
     case: EvaluationCase,
     results: list[SearchResult],
-    k: int,
+    *,
+    f1_k: int = RETRIEVAL_F1_K,
+    mrr_k: int = RETRIEVAL_MRR_K,
 ) -> RetrievalCaseMetrics:
-    selected = results[:k]
-    groups = case.evidence_groups()
-    relevant = [any(_matches_group(result, group) for group in groups) for result in selected]
-    hit_groups = {
-        group.id for group in groups if any(_matches_group(result, group) for result in selected)
-    }
-    group_count = len(groups)
-    recall = len(hit_groups) / group_count if group_count else 0.0
-    first_rank = next((rank for rank, hit in enumerate(relevant, start=1) if hit), None)
-    reciprocal_rank = 1.0 / first_rank if first_rank else 0.0
-    # A group contributes gain only once. Otherwise several chunks from the same
-    # chapter could make nDCG larger than 1 without improving evidence coverage.
-    seen_groups: set[str] = set()
-    dcg = 0.0
-    for rank, result in enumerate(selected, start=1):
-        new_groups = {
-            group.id
-            for group in groups
-            if group.id not in seen_groups and _matches_group(result, group)
-        }
-        if new_groups:
-            dcg += 1.0 / math.log2(rank + 1)
-            seen_groups.update(new_groups)
-    ideal_hits = min(group_count, k)
-    ideal_dcg = sum(1.0 / math.log2(rank + 1) for rank in range(1, ideal_hits + 1))
+    if not case.answerable:
+        raise ValueError("retrieval F1 and MRR are only defined for answerable cases")
+    gold = set(case.gold_chunk_ids)
+    selected = results[:f1_k]
+    retrieved = [result.chunk.chunk_id for result in selected]
+    hit_count = len(set(retrieved) & gold)
+    precision = hit_count / len(retrieved) if retrieved else 0.0
+    recall = hit_count / len(gold)
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    first_rank = next(
+        (
+            rank
+            for rank, result in enumerate(results[:mrr_k], start=1)
+            if result.chunk.chunk_id in gold
+        ),
+        None,
+    )
     return RetrievalCaseMetrics(
         case_id=case.id,
         question_type=case.question_type,
+        precision_at_k=precision,
         recall_at_k=recall,
-        reciprocal_rank=reciprocal_rank,
-        ndcg_at_k=dcg / ideal_dcg if ideal_dcg else 0.0,
-        group_coverage_at_k=recall,
-        all_groups_hit_at_k=float(bool(groups) and len(hit_groups) == group_count),
-        retrieved_chunk_ids=[result.chunk.chunk_id for result in selected],
-        retrieved_topic_ids=[result.chunk.topic_id for result in selected],
+        f1_at_k=f1,
+        reciprocal_rank=1.0 / first_rank if first_rank else 0.0,
+        retrieved_chunk_ids=[result.chunk.chunk_id for result in results[:mrr_k]],
     )
 
 
@@ -112,17 +98,16 @@ def aggregate_retrieval_metrics(
     metrics: list[RetrievalCaseMetrics],
 ) -> dict[str, object]:
     if not metrics:
-        return {"count": 0}
+        return {"overall": {"count": 0}, "by_question_type": {}}
 
     def summarize(items: list[RetrievalCaseMetrics]) -> dict[str, float | int]:
         count = len(items)
         return {
             "count": count,
-            "recall": sum(item.recall_at_k for item in items) / count,
-            "mrr": sum(item.reciprocal_rank for item in items) / count,
-            "ndcg": sum(item.ndcg_at_k for item in items) / count,
-            "group_coverage": sum(item.group_coverage_at_k for item in items) / count,
-            "all_groups_hit_rate": sum(item.all_groups_hit_at_k for item in items) / count,
+            "precision_at_5": sum(item.precision_at_k for item in items) / count,
+            "recall_at_5": sum(item.recall_at_k for item in items) / count,
+            "f1_at_5": sum(item.f1_at_k for item in items) / count,
+            "mrr_at_10": sum(item.reciprocal_rank for item in items) / count,
         }
 
     grouped: dict[str, list[RetrievalCaseMetrics]] = {}
@@ -136,93 +121,142 @@ def aggregate_retrieval_metrics(
     }
 
 
-def evaluate_answer_case(case: EvaluationCase, answer: Answer) -> dict[str, float | bool]:
-    if not case.answerable:
-        return {
-            "refusal_correct": answer.refused,
-            "answer_point_coverage": 1.0 if answer.refused else 0.0,
-            "citation_correctness": 1.0 if answer.refused else 0.0,
-        }
-    normalized = answer.text.lower()
-    covered = [
-        point
-        for point in case.answer_points
-        if not point.keywords or any(keyword.lower() in normalized for keyword in point.keywords)
-    ]
-    valid_chunk_ids = {
-        chunk_id for group in case.evidence_groups() for chunk_id in group.acceptable_chunk_ids
-    }
-    valid_topic_ids = {
-        topic_id for group in case.evidence_groups() for topic_id in group.acceptable_topic_ids
-    }
-    evidence_by_chunk = {item.chunk.chunk_id: item.chunk for item in answer.evidence}
-    supported_citations = 0
-    for citation in answer.citations:
-        evidence = evidence_by_chunk.get(citation.chunk_id)
-        if citation.chunk_id in valid_chunk_ids or (
-            evidence is not None and evidence.topic_id in valid_topic_ids
-        ):
-            supported_citations += 1
+def aggregate_generation_metrics(
+    metrics: Iterable[GenerationCaseMetrics],
+) -> dict[str, float | int | None]:
+    items = list(metrics)
+
+    def average(name: str) -> float | None:
+        values = [getattr(item, name) for item in items if getattr(item, name) is not None]
+        return sum(values) / len(values) if values else None
+
+    refusal_values = [item.refusal_correct for item in items if item.refusal_correct is not None]
     return {
-        "refusal_correct": not answer.refused,
-        "answer_point_coverage": (
-            len(covered) / len(case.answer_points)
-            if case.answer_points
-            else float(not answer.refused)
+        "answerable_count": sum(item.faithfulness is not None for item in items),
+        "unanswerable_count": len(refusal_values),
+        "faithfulness": average("faithfulness"),
+        "answer_relevancy": average("answer_relevancy"),
+        "completeness": average("completeness"),
+        "refusal_accuracy": (
+            sum(bool(value) for value in refusal_values) / len(refusal_values)
+            if refusal_values
+            else None
         ),
-        "citation_correctness": (
-            supported_citations / len(answer.citations) if answer.citations else 0.0
-        ),
-        "citation_format_valid": answer.citation_validated,
     }
 
 
-@dataclass(frozen=True)
-class ThresholdMetrics:
-    threshold: float
-    true_positive_rate: float
-    true_negative_rate: float
-    balanced_accuracy: float
+class LocalRagasEmbedding(BaseRagasEmbedding):
+    """Expose the project's Embedder through Ragas' embedding interface."""
+
+    def __init__(self, embedder: Embedder) -> None:
+        super().__init__()
+        self.embedder = embedder
+
+    def embed_text(self, text: str, **kwargs: Any) -> list[float]:
+        del kwargs
+        return self.embedder.embed_query(text)
+
+    async def aembed_text(self, text: str, **kwargs: Any) -> list[float]:
+        del kwargs
+        return await asyncio.to_thread(self.embedder.embed_query, text)
+
+    def embed_texts(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
+        del kwargs
+        return self.embedder.embed_documents(texts)
+
+    async def aembed_texts(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
+        del kwargs
+        return await asyncio.to_thread(self.embedder.embed_documents, texts)
 
 
-def suggest_min_score(
-    labeled_scores: Iterable[tuple[bool, float | None]],
-) -> ThresholdMetrics | None:
-    """Select a refusal threshold using balanced answerability accuracy.
+class AsyncMetric(Protocol):
+    async def ascore(self, **kwargs: Any) -> Any: ...
 
-    This deliberately calibrates only the evidence/no-evidence gate. Retrieval
-    Recall@K remains a separate metric because a high score is not proof that
-    the expected topic was recalled.
-    """
 
-    samples = [(label, score) for label, score in labeled_scores if score is not None]
-    positives = sum(label for label, _ in samples)
-    negatives = len(samples) - positives
-    if not samples or not positives or not negatives:
-        return None
+class RagasJudge:
+    def __init__(
+        self,
+        faithfulness: AsyncMetric,
+        answer_relevancy: AsyncMetric,
+        completeness: AsyncMetric,
+    ) -> None:
+        self.faithfulness = faithfulness
+        self.answer_relevancy = answer_relevancy
+        self.completeness = completeness
 
-    scores = sorted({score for _, score in samples})
-    epsilon = 1e-9
-    candidates = [scores[0] - epsilon]
-    candidates.extend((left + right) / 2 for left, right in zip(scores, scores[1:], strict=False))
-    candidates.append(scores[-1] + epsilon)
+    @staticmethod
+    def _score_value(result: Any) -> float | None:
+        value = float(result.value)
+        return value if math.isfinite(value) else None
 
-    best: ThresholdMetrics | None = None
-    for threshold in candidates:
-        true_positives = sum(label and score >= threshold for label, score in samples)
-        true_negatives = sum(not label and score < threshold for label, score in samples)
-        true_positive_rate = true_positives / positives
-        true_negative_rate = true_negatives / negatives
-        balanced_accuracy = (true_positive_rate + true_negative_rate) / 2
-        metrics = ThresholdMetrics(
-            threshold=threshold,
-            true_positive_rate=true_positive_rate,
-            true_negative_rate=true_negative_rate,
-            balanced_accuracy=balanced_accuracy,
+    async def score(
+        self,
+        case: EvaluationCase,
+        answer: Answer,
+    ) -> tuple[SingleTurnSample, GenerationCaseMetrics]:
+        sample = SingleTurnSample(
+            user_input=case.user_input,
+            response=answer.text,
+            retrieved_contexts=[item.chunk.text for item in answer.evidence],
+            retrieved_context_ids=[item.chunk.chunk_id for item in answer.evidence],
+            reference=case.reference,
+            reference_contexts=case.reference_contexts,
+            reference_context_ids=case.gold_chunk_ids,
         )
-        if best is None or (metrics.balanced_accuracy, metrics.threshold) > (
-            best.balanced_accuracy,
-            best.threshold,
-        ):
-            best = metrics
-    return best
+        if not case.answerable:
+            return sample, GenerationCaseMetrics(refusal_correct=answer.refused)
+        if answer.refused or not answer.evidence:
+            return sample, GenerationCaseMetrics(
+                faithfulness=0.0,
+                answer_relevancy=0.0,
+                completeness=0.0,
+            )
+        faithfulness = await self.faithfulness.ascore(
+            user_input=sample.user_input,
+            response=sample.response,
+            retrieved_contexts=sample.retrieved_contexts,
+        )
+        relevancy = await self.answer_relevancy.ascore(
+            user_input=sample.user_input,
+            response=sample.response,
+        )
+        completeness = await self.completeness.ascore(
+            response=sample.response,
+            reference=sample.reference,
+        )
+        return sample, GenerationCaseMetrics(
+            faithfulness=self._score_value(faithfulness),
+            answer_relevancy=self._score_value(relevancy),
+            completeness=self._score_value(completeness),
+        )
+
+
+def build_ragas_judge(
+    *,
+    model: str,
+    api_key: str,
+    base_url: str,
+    embedder: Embedder,
+    cache_dir: Path,
+    relevancy_strictness: int = 1,
+) -> RagasJudge:
+    cache = DiskCacheBackend(str(cache_dir))
+    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+    evaluator_llm = llm_factory(
+        model,
+        provider="openai",
+        client=client,
+        adapter="instructor",
+        cache=cache,
+        temperature=0,
+    )
+    embeddings = LocalRagasEmbedding(embedder)
+    return RagasJudge(
+        Faithfulness(llm=evaluator_llm),
+        AnswerRelevancy(
+            llm=evaluator_llm,
+            embeddings=embeddings,
+            strictness=relevancy_strictness,
+        ),
+        FactualCorrectness(llm=evaluator_llm, mode="recall"),
+    )

@@ -71,6 +71,23 @@ class ChatService:
             },
         )
         outcome = await self.retrieve(question, self.settings.candidate_top_k, filters)
+        return await self.answer_from_outcome(
+            question,
+            outcome,
+            filters,
+            started=started,
+        )
+
+    async def answer_from_outcome(
+        self,
+        question: str,
+        outcome: RetrievalOutcome,
+        filters: RetrievalFilters | None = None,
+        *,
+        started: float | None = None,
+    ) -> Answer:
+        """Generate once from an existing retrieval result, primarily for evaluation."""
+        started = started or time.perf_counter()
         query = outcome.query or RetrievalQuery(
             text=question, filters=filters or RetrievalFilters()
         )

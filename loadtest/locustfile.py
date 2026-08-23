@@ -8,9 +8,9 @@ from pathlib import Path
 from locust import HttpUser, between, task
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATASET = Path(os.getenv("RAG_LOADTEST_DATASET", PROJECT_ROOT / "data/eval/full_v1.jsonl"))
+DATASET = Path(os.getenv("RAG_LOADTEST_DATASET", PROJECT_ROOT / "data/eval/rag_eval_v2.jsonl"))
 QUESTIONS = [
-    json.loads(line)["question"]
+    json.loads(line)["user_input"]
     for line in DATASET.read_text(encoding="utf-8").splitlines()
     if line.strip()
 ]

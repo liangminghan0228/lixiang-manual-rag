@@ -315,7 +315,7 @@ lixiang__other-embedding__heading-500__v1
 冻结同一个 raw snapshot 和同一套问答集，只改变 parser/chunker。每个方案使用独立 `index_version`，比较：
 
 - chunk 数量与长度分布；
-- Recall@K、MRR、nDCG；
+- F1@5、MRR@10；
 - 索引构建时间和存储量；
 - 检索 P95/P99。
 
@@ -329,7 +329,7 @@ lixiang__other-embedding__heading-500__v1
 
 ### 8.4 比较 Generator
 
-冻结 `EvidenceBundle`，分别调用不同 Generator。比较引用正确率、答案要点覆盖率、拒答率、延迟和成本，不能让不同 LLM 重新检索证据。
+冻结同一次检索结果和EvidenceBundle，分别调用不同Generator。通过Ragas比较忠实度、答案相关性、完整性，并单独比较拒答率、延迟和成本，不能让不同LLM重新检索证据。
 
 ### 8.5 端到端比较
 

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
-
-from app.evaluation import suggest_min_score
-from app.settings import PROJECT_ROOT, load_settings
+from app.settings import RuntimeEnvironment, load_settings
 
 
 def test_mvp_settings_load() -> None:
@@ -13,18 +10,13 @@ def test_mvp_settings_load() -> None:
     assert settings.data.raw_dir.is_absolute()
 
 
-def test_smoke_dataset_has_twenty_cases_and_unanswerables() -> None:
-    path = PROJECT_ROOT / "data" / "eval" / "smoke.jsonl"
-    cases = [
-        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
-    assert len(cases) == 20
-    assert sum(not case["answerable"] for case in cases) >= 5
+def test_runtime_environment_reads_ragas_settings(monkeypatch) -> None:
+    monkeypatch.setenv("RAGAS_JUDGE_API_KEY", "judge-key")
+    monkeypatch.setenv("RAGAS_JUDGE_MODEL", "provider/fixed-judge")
+    monkeypatch.setenv("RAGAS_JUDGE_BASE_URL", "https://judge.example/v1")
 
+    runtime = RuntimeEnvironment(_env_file=None)
 
-def test_threshold_calibration_separates_answerable_cases() -> None:
-    metrics = suggest_min_score([(True, 0.82), (True, 0.73), (False, 0.22), (False, 0.31)])
-
-    assert metrics is not None
-    assert 0.31 < metrics.threshold < 0.73
-    assert metrics.balanced_accuracy == 1.0
+    assert runtime.ragas_judge_api_key == "judge-key"
+    assert runtime.ragas_judge_model == "provider/fixed-judge"
+    assert runtime.ragas_judge_base_url == "https://judge.example/v1"
